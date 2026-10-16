@@ -14,7 +14,8 @@ COUNT_ONLY_CAMO = "false"
 [[d1_databases]]
 binding = "DB"
 database_name = "gh-view-counter"
-# Paste the id printed by `npx wrangler d1 create gh-view-counter`.
+# The id printed by `npx wrangler d1 create gh-view-counter`. If you fork this
+# project, replace it with your own database's id.
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
