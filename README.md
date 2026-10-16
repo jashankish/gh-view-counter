@@ -47,17 +47,94 @@ The badge can be a slim pill or a small card that also shows today's visits and 
 
 ## Quick start
 
-After [deploying](#deploy), add one line to your profile's `README.md`:
+Put the counter on your own GitHub profile in about 10 minutes. It runs on **your own** free Cloudflare account; nothing in this repository is tied to anyone else's.
 
-```markdown
-![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>)
+**You need:** a GitHub account, a free [Cloudflare account](https://dash.cloudflare.com/sign-up), [Node.js](https://nodejs.org) 22.5 or newer, and a terminal.
+
+**1. Get the code**
+
+Fork this repository on GitHub, then:
+
+```bash
+git clone https://github.com/<your-username>/gh-view-counter.git
+cd gh-view-counter
+npm install
 ```
 
-Or use the stats card:
+**2. Sign in to Cloudflare**
+
+```bash
+npx wrangler login
+```
+
+A browser window opens. Approve access, then return to the terminal.
+
+**3. Create the database**
+
+```bash
+npm run db:create
+```
+
+The output ends with a line like `database_id = "1a2b3c4d-…"`. Copy that ID.
+
+**4. Add your two settings**
+
+Open `wrangler.toml` and change these two lines:
+
+```toml
+ALLOWED_USERS = "<your-username>"         # your GitHub username
+database_id = "<the ID from step 3>"
+```
+
+**5. Create the tables**
+
+```bash
+npm run db:migrate
+```
+
+Answer `y` if asked to confirm.
+
+**6. Deploy**
+
+```bash
+npm run deploy
+```
+
+The first time, Cloudflare asks you to pick a `workers.dev` subdomain; any free name works. The output ends with your Worker's address, such as `https://gh-view-counter.<your-subdomain>.workers.dev`.
+
+**7. Check that it works**
+
+Open this in a browser, with your own address and username:
+
+```
+https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>&style=card&preview=true
+```
+
+You should see the card showing `0`. `preview=true` displays the badge without counting a view.
+
+**8. Add it to your profile**
+
+Your profile README lives in a repository named exactly like your username (`<your-username>/<your-username>`). If you don't have one yet, create it on GitHub and tick **Add a README file**. Then add this line wherever you want the counter:
 
 ```markdown
 ![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>&style=card)
 ```
+
+Commit the change and open your profile; the count goes up with every visit. Use `style=card&theme=dark` for the dark card, or leave out `style=card` for the slim pill. See [Styles](#styles) for every option.
+
+**If something looks wrong**
+
+| You see | Fix |
+| --- | --- |
+| A badge saying `user not allowed` | The username in the URL doesn't match `ALLOWED_USERS` in `wrangler.toml`. Fix it and run `npm run deploy` again. |
+| A badge saying `unavailable` | The tables don't exist yet. Run `npm run db:migrate`. |
+| `npm run deploy` fails mentioning the database | `database_id` in `wrangler.toml` is still the all-zero placeholder, or has a typo. Copy it again from step 3, or find it with `npx wrangler d1 list`. |
+| An error about authentication | Your Cloudflare sign-in expired. Run `npx wrangler login` again. |
+| The number doesn't change when you refresh | GitHub can take a few seconds to fetch a new image. Each page load counts once. |
+
+**Before you push your fork:** `wrangler.toml` now contains your database ID. It isn't a password, but if you'd rather not publish it, don't commit that file, or use the [GitHub Actions setup](#option-b-deploy-from-github-actions-keeping-your-values-out-of-the-repository), which keeps both settings out of the repository.
+
+To move your existing count over from another counter, see [Carrying over a count](#carrying-over-a-count-from-another-counter).
 
 ---
 
@@ -451,50 +528,13 @@ The committed `wrangler.toml` holds neutral defaults: an all-zero `database_id` 
 
 ### Option A: deploy from your computer
 
-1. Get the code and install the tools:
-
-   ```bash
-   git clone https://github.com/<owner>/gh-view-counter.git   # or your fork
-   cd gh-view-counter
-   npm install
-   ```
-
-2. Sign in to Cloudflare and create the database:
-
-   ```bash
-   npx wrangler login       # opens your browser once
-   npm run db:create        # prints: database_id = "…"
-   ```
-
-3. Open `wrangler.toml` and fill in your values:
-
-   ```toml
-   ALLOWED_USERS = "<your-username>"
-   database_id = "<the id printed in step 2>"
-   ```
-
-4. Create the tables and deploy:
-
-   ```bash
-   npm run db:migrate       # creates the views and daily_views tables
-   npm run deploy           # prints https://gh-view-counter.<your-subdomain>.workers.dev
-   ```
-
-   The first time you deploy a Worker, Cloudflare asks you to choose a `workers.dev` subdomain. That subdomain becomes part of your badge URL.
-
-5. Add the badge to the `README.md` of your profile repository, the repository named exactly like your username (`<your-username>/<your-username>`):
-
-   ```markdown
-   ![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>&style=card)
-   ```
-
-If you publish your copy of the repository, decide whether you're comfortable committing your database ID. It isn't a password, but if you'd rather keep it private, don't commit your edited `wrangler.toml`; use option B instead.
+Follow the step-by-step [Quick start](#quick-start). You put both values in `wrangler.toml` and deploy with `npm run deploy`.
 
 ### Option B: deploy from GitHub Actions, keeping your values out of the repository
 
 `.github/workflows/deploy.yml` runs the tests on every push and pull request. On pushes to `main`, it applies database migrations and deploys. Before deploying, it writes your values into `wrangler.toml` inside the build machine only, so the repository keeps its neutral defaults.
 
-1. Do steps 1 and 2 of option A once to create your database, or create it in the Cloudflare dashboard under Storage & Databases → D1. Note its ID.
+1. Fork the repository, then create your database once, either with Quick start steps 1–3 or in the Cloudflare dashboard under Storage & Databases → D1. Note its ID. You don't need to edit `wrangler.toml`. If you've never deployed a Worker before, also choose your `workers.dev` subdomain once in the Cloudflare dashboard under Workers & Pages, since the automated deploy can't answer that prompt.
 2. In your repository on GitHub, open **Settings → Secrets and variables → Actions** and add:
 
    | Kind | Name | Value |
@@ -504,7 +544,7 @@ If you publish your copy of the repository, decide whether you're comfortable co
    | Secret | `D1_DATABASE_ID` | Your database ID |
    | Variable | `ALLOWED_USERS` | Your GitHub username, or several separated by commas |
 
-3. Push to `main`, or run the workflow by hand from the **Actions** tab. Do step 5 of option A to add the badge.
+3. Push to `main`, or run the workflow by hand from the **Actions** tab. Its log shows your Worker's address. Then do Quick start steps 7 and 8 to check the badge and add it to your profile.
 
 Until `CLOUDFLARE_API_TOKEN` is set, the deploy job is skipped with a notice rather than failing, so a fresh fork passes CI.
 
