@@ -1,5 +1,5 @@
-import { renderBadge, formatCount, ERROR_COLOR } from "./badge.js";
-import { incrementViews, readViews } from "./db.js";
+import { renderBadge, renderError, formatCount } from "./badge.js";
+import { incrementViews, readViews, readHistory, utcDay } from "./db.js";
 import { parseTarget, parseBadgeOptions, parseAllowlist, isTrue } from "./params.js";
 
 // GitHub's camo proxy caches aggressively; these force a fresh fetch per view.
@@ -16,9 +16,12 @@ const USAGE = `GitHub view counter
   GET /api/views?user=<name>[&repo=]     JSON, read-only
   GET /health                            liveness check
 
-Badge options: label, color, labelColor, style=flat|flat-square|for-the-badge,
+Badge options: style=modern|card|flat|flat-square|for-the-badge, label, color,
+               labelColor, theme=auto|light|dark (card), icon=false, animate=false,
                abbreviated=true, base=<offset>, preview=true (don't count)
 `;
+
+const HISTORY_DAYS = 30;
 
 export default {
   fetch: (request, env) => handleRequest(request, env),
@@ -53,7 +56,7 @@ async function badge(request, url, env) {
 
   // Errors are still rendered as 200 SVGs: camo shows a broken image for non-2xx,
   // and a readable "invalid user" badge is far easier to debug in a README.
-  const fail = (message) => svg(renderBadge({ ...opts, message, color: ERROR_COLOR }));
+  const fail = (message) => svg(renderError(opts, message));
 
   if (target.error) return fail(target.error);
   if (!isAllowed(target.user, env)) return fail("user not allowed");
@@ -63,15 +66,26 @@ async function badge(request, url, env) {
     !isTrue(url.searchParams.get("preview")) &&
     (!isTrue(env.COUNT_ONLY_CAMO) || isCamo(request));
 
+  const today = utcDay();
   let views;
+  let history = [];
   try {
-    views = shouldCount ? await incrementViews(env.DB, target.id) : await readViews(env.DB, target.id);
+    views = shouldCount ? await incrementViews(env.DB, target.id, today) : await readViews(env.DB, target.id);
+    // Only the card shows history; other styles skip the extra read.
+    if (opts.style === "card") history = await readHistory(env.DB, target.id, today, HISTORY_DAYS);
   } catch (err) {
     console.error("D1 error", err);
     return fail("unavailable");
   }
 
-  return svg(renderBadge({ ...opts, message: formatCount(views + opts.base, opts.abbreviated) }));
+  return svg(
+    renderBadge({
+      ...opts,
+      message: formatCount(views + opts.base, opts.abbreviated),
+      history,
+      today: history.at(-1) ?? 0,
+    }),
+  );
 }
 
 async function apiViews(url, env) {
@@ -79,7 +93,12 @@ async function apiViews(url, env) {
   if (target.error) return json({ error: target.error }, 400);
   if (!isAllowed(target.user, env)) return json({ error: "user not allowed" }, 403);
   try {
-    return json({ id: target.id, views: await readViews(env.DB, target.id) });
+    const today = utcDay();
+    const [views, history] = await Promise.all([
+      readViews(env.DB, target.id),
+      readHistory(env.DB, target.id, today, HISTORY_DAYS),
+    ]);
+    return json({ id: target.id, views, today: history.at(-1), history });
   } catch (err) {
     console.error("D1 error", err);
     return json({ error: "unavailable" }, 503);

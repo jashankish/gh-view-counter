@@ -46,7 +46,7 @@
 <body>
 <main>
   <h1>Free-tier headroom</h1>
-  <p class="sub">How much of each stack's free quota a view counter uses. Each view costs 1 request plus 1 write. Monthly quotas are divided by 30.</p>
+  <p class="sub">How much of each stack's free quota a view counter uses. Each view costs 1 request plus the writes its storage needs; this project writes 2 rows per view (the total and today's count). Monthly quotas are divided by 30.</p>
 
   <div class="control">
     <label for="views">Profile views per day <output id="out">1,000 <small>views/day</small></output></label>
@@ -61,7 +61,7 @@
 <script>
   // Each stack: daily capacity of each resource, in views/day.
   const STACKS = [
-    { name: "Workers + D1", tag: "this project", limits: [["Worker requests", 100000], ["D1 rows written", 100000], ["D1 rows read", 5000000]] },
+    { name: "Workers + D1", tag: "this project", limits: [["Worker requests", 100000], ["D1 rows written", 100000 / 2], ["D1 rows read", 5000000]] },
     { name: "Workers + KV", limits: [["Worker requests", 100000], ["KV writes", 1000], ["KV reads", 100000]] },
     { name: "Vercel + Upstash Redis", limits: [["Vercel invocations", 1000000 / 30], ["Upstash commands", 500000 / 30]] },
     { name: "AWS Lambda + DynamoDB", limits: [["Lambda requests", 1000000 / 30]] },

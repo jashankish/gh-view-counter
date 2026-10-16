@@ -10,7 +10,8 @@
     "db:create": "wrangler d1 create gh-view-counter",
     "db:migrate:local": "wrangler d1 migrations apply gh-view-counter --local",
     "db:migrate": "wrangler d1 migrations apply gh-view-counter --remote",
-    "test": "node --no-warnings --test \"test/**/*.test.js\""
+    "test": "node --no-warnings --test \"test/**/*.test.js\"",
+    "examples": "node scripts/render-examples.js"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

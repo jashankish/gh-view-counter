@@ -24,8 +24,10 @@ test("increments atomically and returns an uncacheable SVG", async () => {
 test("concurrent views are never lost", async () => {
   const e = env();
   await Promise.all(Array.from({ length: 50 }, () => get(e, "/?user=octocat")));
-  const res = await get(e, "/api/views?user=octocat");
-  assert.deepEqual(await res.json(), { id: "octocat", views: 50 });
+  const body = await (await get(e, "/api/views?user=octocat")).json();
+  assert.equal(body.id, "octocat");
+  assert.equal(body.views, 50);
+  assert.equal(body.today, 50, "daily bucket is incremented in the same batch");
 });
 
 test("usernames are case-insensitive and repos get separate counters", async () => {
@@ -99,17 +101,101 @@ test("routing: usage page, health, 404, 405", async () => {
   assert.equal((await get(e, "/?user=a", { method: "POST" })).status, 405);
 });
 
-test("label and colours cannot inject markup", () => {
-  const svg = renderBadge({ label: `"><script>alert(1)</script>`, message: "1", color: `red" onload="x`, labelColor: "zzz" });
-  assert.doesNotMatch(svg, /<script/);
-  assert.doesNotMatch(svg, /onload/);
-  assert.match(svg, /fill="#007ec6"/); // invalid colour falls back to default
-  assert.match(svg, /fill="#555"/);
+test("label and colours cannot inject markup in any style", () => {
+  for (const style of ["modern", "card", "flat", "flat-square", "for-the-badge"]) {
+    const svg = renderBadge({
+      style,
+      label: `"><script>alert(1)</script>`,
+      message: "1",
+      color: `red" onload="x`,
+      labelColor: "zzz",
+      history: [1, 2, 3],
+      today: 3,
+    });
+    assert.doesNotMatch(svg, /<script/i, style);
+    assert.doesNotMatch(svg, /onload/, style);
+  }
+  // invalid colours fall back to each style's defaults
+  const flat = renderBadge({ style: "flat", label: "a", message: "1", color: "url(#x)", labelColor: "zzz" });
+  assert.match(flat, /fill="#007ec6"/);
+  assert.match(flat, /fill="#555"/);
+  assert.match(renderBadge({ label: "a", message: "1", color: "url(#x)" }), /stop-color="#6366f1"/);
 });
 
-test("badge styles render with expected heights", () => {
-  assert.match(renderBadge({ label: "views", message: "42" }), /height="20"/);
-  assert.match(renderBadge({ label: "views", message: "42", style: "flat-square" }), /rx="0"/);
+test("default style is the modern pill", async () => {
+  const svg = await (await get(env(), "/?user=a")).text();
+  assert.match(svg, /height="28"/);
+  assert.match(svg, /rx="14"/);
+  assert.match(svg, /linearGradient id="g"/);
+  assert.match(svg, /<path d="M1 7c/, "eye icon");
+  assert.match(svg, /@keyframes sweep/);
+  assert.match(svg, /prefers-reduced-motion/);
+});
+
+test("animations never hide content at rest", () => {
+  // Browsers may freeze animated SVGs in <img> on the first frame, so the only
+  // element allowed to start transparent is a decorative one (sweep / pulse).
+  for (const style of ["modern", "card"]) {
+    const svg = renderBadge({ style, label: "v", message: "1", history: [1, 2], today: 2 });
+    const hidden = [...svg.matchAll(/\.([\w-]+)\{[^}]*opacity:0[;}]/g)].map((m) => m[1]);
+    assert.deepEqual(hidden.filter((c) => !["sw", "pl"].includes(c)), [], style);
+    assert.doesNotMatch(svg, /from\{opacity:0/, style);
+  }
+});
+
+test("modern options: icon, animate, colour gradient", () => {
+  const plain = renderBadge({ label: "views", message: "42", icon: false, animate: false });
+  assert.doesNotMatch(plain, /M1 7c/);
+  assert.doesNotMatch(plain, /<style>/);
+  const teal = renderBadge({ label: "views", message: "42", color: "teal" });
+  assert.match(teal, /stop-color="#14b8a6"/);
+  assert.equal((teal.match(/stop-color="#[0-9a-f]{6}"/g) ?? []).length >= 2, true);
+  const noLabel = renderBadge({ label: "", message: "42", icon: false });
+  assert.match(noLabel, /<rect x="0" width/);
+});
+
+test("card shows total, today and a 30-day trend", async () => {
+  const e = env();
+  for (let i = 0; i < 3; i++) await get(e, "/?user=a");
+  const svg = await (await get(e, "/?user=a&style=card")).text();
+  assert.match(svg, /height="104"/);
+  assert.match(svg, />4</, "total");
+  assert.match(svg, /\+4 today/);
+  assert.match(svg, /Last 30 days/);
+  assert.match(svg, /<path class="ln" d="M[\d.]+ [\d.]+(C[\d. ]+){29}"/, "29 curve segments for 30 points");
+  assert.match(svg, /prefers-color-scheme:dark/);
+  const dark = await (await get(e, "/?user=a&style=card&theme=dark&preview=true")).text();
+  assert.doesNotMatch(dark, /prefers-color-scheme/);
+  assert.match(dark, /fill:#0d1117/);
+});
+
+test("card errors fall back to the pill", async () => {
+  const svg = await (await get(env({ ALLOWED_USERS: "x" }), "/?user=a&style=card")).text();
+  assert.match(svg, /user not allowed/);
+  assert.match(svg, /height="28"/);
+});
+
+test("history is zero-filled and ordered oldest first", async () => {
+  const e = env();
+  const day = new Date().toISOString().slice(0, 10);
+  const prev = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+  e.DB.raw.exec(`INSERT INTO daily_views (id, day, count) VALUES ('a', '${prev}', 7), ('a', '${day}', 2)`);
+  const { history } = await (await get(e, "/api/views?user=a")).json();
+  assert.equal(history.length, 30);
+  assert.deepEqual(history.slice(-3), [7, 0, 2]);
+});
+
+test("smoothed trend never overshoots the data", () => {
+  const svg = renderBadge({ style: "card", label: "v", message: "1", history: [0, 10, 0, 0, 50, 0], today: 0 });
+  const d = svg.match(/class="ln" d="([^"]+)"/)[1];
+  const ys = [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => +m[2]);
+  // the plot area spans y=26..72
+  assert.ok(Math.min(...ys) >= 26 && Math.max(...ys) <= 72, `y range ${Math.min(...ys)}..${Math.max(...ys)}`);
+});
+
+test("classic styles still render", () => {
+  assert.match(renderBadge({ style: "flat", label: "views", message: "42" }), /height="20"/);
+  assert.match(renderBadge({ style: "flat-square", label: "views", message: "42" }), /rx="0"/);
   const ftb = renderBadge({ label: "views", message: "42", style: "for-the-badge" });
   assert.match(ftb, /height="28"/);
   assert.match(ftb, />VIEWS</);
