@@ -28,7 +28,11 @@ The badge can be a slim pill or a small card that also shows today's visits and 
   - [The path of a single page view](#2-the-path-of-a-single-page-view)
   - [Defeating the cache](#3-defeating-the-cache)
   - [Inside the Worker](#4-inside-the-worker)
-  - [Counting without losing views](#5-counting-without-losing-views)
+  - [Storing and calculating the count](#5-storing-and-calculating-the-count)
+    - [Where the data lives](#where-the-data-lives)
+    - [Calculating the number on the badge](#calculating-the-number-on-the-badge)
+    - [Carrying over a count from another counter](#carrying-over-a-count-from-another-counter)
+    - [Backups and restoring](#backups-and-restoring)
   - [Drawing the badge](#6-drawing-the-badge)
   - [When things go wrong](#7-when-things-go-wrong)
   - [What the number actually means](#8-what-the-number-actually-means)
@@ -189,9 +193,28 @@ If any condition fails, the Worker just reads the current value without changing
 
 **Display options.** `base` adds a fixed offset to the displayed number without changing what's stored, for example to carry over a count from another service. `abbreviated=true` formats large numbers compactly: `1,234` becomes `1.2k` and `3,200,000` becomes `3.2M`.
 
-### 5. Counting without losing views
+### 5. Storing and calculating the count
 
-There are two tables (`migrations/`). `views` holds one running total per counter. `daily_views` holds one row per counter per UTC day and feeds the card's trend line.
+This section covers where the count lives, exactly what is written for each view, how the number on the badge is worked out from what's stored, and how to inspect, back up, correct or carry over your data.
+
+#### Where the data lives
+
+All counts are stored in a **Cloudflare D1 database**, a hosted SQLite database, in the Cloudflare account that deployed the Worker.
+
+| | |
+| --- | --- |
+| **Database** | `gh-view-counter`, created by `npm run db:create` |
+| **Location** | One primary region chosen by Cloudflare when the database is created, usually the one nearest you. The Worker runs worldwide and reaches the database over Cloudflare's network. |
+| **How the Worker finds it** | The `[[d1_databases]]` block in `wrangler.toml` binds the database to the name `DB`. The code only ever refers to `env.DB`. The `database_id` there identifies the database but isn't a secret; nothing can be read without the account's credentials. |
+| **Tables** | Created by the SQL files in `migrations/`, which `npm run db:migrate` applies in order |
+
+The data is **not** stored in GitHub, in this repository or in the badge image. A badge is generated fresh on every request from what's in the database.
+
+When you run `npm run dev`, the Worker uses a separate **local** copy of the database under `.wrangler/state/`, which git ignores. Local test views never touch the production numbers, and production data is never downloaded to your machine unless you export it.
+
+#### The tables
+
+There are two tables. `views` holds one running total per counter. `daily_views` holds one row per counter per UTC day and feeds the card's trend line and the "today" figure.
 
 ```sql
 CREATE TABLE IF NOT EXISTS views (
@@ -209,7 +232,19 @@ CREATE TABLE IF NOT EXISTS daily_views (
 ) WITHOUT ROWID;
 ```
 
-Each view sends two statements to D1 in a single `batch()` (`src/db.js`):
+| Column | Meaning |
+| --- | --- |
+| `id` | The counter's key: the lowercased username (`jashankish`), or `username/repo` for a per-repository counter (`jashankish/gh-view-counter`). Each key is an independent counter. |
+| `views.count` | The all-time total of counted views for that key |
+| `views.created_at` / `updated_at` | Unix timestamps (seconds) of the first view and the most recent one |
+| `daily_views.day` | A UTC calendar date written as text, `YYYY-MM-DD`, so rows sort chronologically |
+| `daily_views.count` | Views counted on that UTC day |
+
+A counter has no rows until its first view. There is no sign-up or setup step: the first counted view creates both rows.
+
+#### Recording a view
+
+Each counted view sends two statements to D1 in a single `batch()` (`src/db.js`):
 
 ```sql
 INSERT INTO views (id, count) VALUES (?, 1)
@@ -235,9 +270,101 @@ In the statements above, the database adds 1 itself. SQLite, which D1 is built o
 
 **Why `WITHOUT ROWID`.** A normal SQLite table stores rows in one internal structure and keeps a separate index for a text primary key. `WITHOUT ROWID` stores each row directly in the primary-key index, so each table costs exactly one row written per view. That matters because D1's free tier is measured in rows.
 
-**Reading the trend.** The card asks for every `daily_views` row from the last 30 days. Days with no views have no row, so the Worker fills those gaps with zeros, giving the trend line exactly 30 evenly spaced points, oldest first.
+**Which day a view lands on.** The Worker, not the database, decides the date: it takes the current time in UTC and keeps the `YYYY-MM-DD` part. That same date is used both to write today's row and, for the card, to find the last 30 days. Reads and writes therefore always agree on which day is "today". Days start and end at midnight UTC, so for viewers in other time zones, "today" rolls over at a different local hour.
 
-**Why D1 and not Workers KV.** KV is Cloudflare's simpler key-value store, but it doesn't fit a counter:
+#### Calculating the number on the badge
+
+Every badge request goes through the same steps, in `src/index.js`:
+
+1. **Decide whether this request counts.** It counts if it's a `GET`, `preview=true` isn't set, and, when `COUNT_ONLY_CAMO` is on, the request came from GitHub's proxy. See [Inside the Worker](#4-inside-the-worker).
+2. **Get the stored total.**
+   - If the view counts, the total is the value the increment statement hands back through `RETURNING`. That is the new total *including* this view, read in the same transaction that wrote it.
+   - If it doesn't count, the Worker runs `SELECT count FROM views WHERE id = ?`. A counter that has never been viewed has no row, so it shows `0`.
+3. **Add the display offset.** `displayed = stored + base`. `base` comes from the URL, defaults to `0`, and must be a positive whole number. It changes only what's drawn, never what's stored.
+4. **Format it.**
+   - By default, the number gets thousands separators: `1234` → `1,234`.
+   - With `abbreviated=true`, numbers of 1,000 or more are scaled to `k`, `M`, `B` or `T`. Below 10 of a unit, one decimal is kept (`1.2k`); from 10 up, whole numbers are used (`13k`). Halves round up (`1,050` → `1.1k`). A value that rounds up to 1,000 of one unit moves to the next (`999,999` → `1M`, not `1000k`).
+5. **Card only: get the daily history.** The Worker asks for every `daily_views` row for this counter dated within the last 30 days, today included. Days with no views have no row, so the gaps are filled with zeros. The result is always exactly 30 numbers, oldest first.
+6. **Card only: today's figure.** The "+N today" number is the last of those 30 values, today's row. It's the stored daily count; `base` is not added.
+7. **Card only: scale the trend line.** Each day's height is its count divided by the largest count in the 30 days, plus 15% headroom so the peak doesn't touch the top. If every day is zero, the line lies flat along the baseline.
+
+A worked example: suppose the stored total for `octocat` is 1,234, today's row says 12, and the badge URL is `?user=octocat&style=card&base=100&abbreviated=true`. A visitor's view runs the increment, so the stored total becomes 1,235 and today's row becomes 13. The card then shows `1.3k` (1,235 + 100 = 1,335, abbreviated) and `+13 today`. The trend line ends at 13, and nothing in the database contains the 100.
+
+The `/api/views` endpoint returns the same stored numbers without counting a view and without applying `base` or formatting:
+
+```json
+{ "id": "octocat", "views": 1235, "today": 13, "history": [0, 0, …, 12, 13] }
+```
+
+#### What is not stored
+
+Only counts and dates are stored. There are no IP addresses, user agents, cookies, referrers, locations or timestamps of individual visits. The Worker couldn't record most of these anyway, because every request reaches it from GitHub's camo proxy rather than from the visitor. The number is a count of page loads, as explained in [What the number actually means](#8-what-the-number-actually-means).
+
+#### How long data is kept
+
+Nothing is deleted automatically. The total grows forever, and one `daily_views` row is added per counter for each day that has at least one view. The card only displays the last 30 days, but older rows stay, so the full daily history remains available for queries.
+
+Storage is tiny. A counter's total is one row of about 50 bytes, and each day of history adds about 40 bytes, roughly 15 KB per counter per year. D1's free plan includes 5 GB.
+
+#### Looking at your data
+
+- **Cloudflare dashboard:** Storage & Databases → D1 → `gh-view-counter`. The Console tab runs SQL queries and the Tables tab browses rows.
+- **The JSON endpoint:** `https://<your-worker>.workers.dev/api/views?user=<name>` gives the total, today and the last 30 days, without counting a view.
+- **The command line,** from the project folder:
+
+```bash
+# All-time totals
+npx wrangler d1 execute gh-view-counter --remote --command "SELECT * FROM views"
+
+# Daily history, newest first
+npx wrangler d1 execute gh-view-counter --remote \
+  --command "SELECT day, count FROM daily_views WHERE id = 'jashankish' ORDER BY day DESC"
+
+# Views per month
+npx wrangler d1 execute gh-view-counter --remote \
+  --command "SELECT substr(day, 1, 7) AS month, SUM(count) AS views FROM daily_views WHERE id = 'jashankish' GROUP BY month ORDER BY month"
+```
+
+Without `--remote`, the commands run against the local development database instead.
+
+#### Carrying over a count from another counter
+
+If you're switching from another service, such as komarev's `ghpvc`, there are two ways to keep your existing number:
+
+- **Seed the database (recommended).** Write the old total in once, and every later view adds to it. The stored total, the badge and `/api/views` all agree, and the badge URL stays clean.
+
+  ```bash
+  npx wrangler d1 execute gh-view-counter --remote \
+    --command "INSERT INTO views (id, count) VALUES ('<your-username>', 1234)
+               ON CONFLICT(id) DO UPDATE SET count = views.count + excluded.count"
+  ```
+
+  The `ON CONFLICT` clause *adds* the old total, so views already counted by this Worker are kept. Read the old counter right before switching your README over, so no views are missed in between. Most counters, komarev included, count a view every time their badge is fetched, so reading it adds one. Subtract your own reads.
+
+- **Use `base`.** Add `&base=1234` to the badge URL. This needs no database access, but the offset exists only in the URL: `/api/views` and the database show the count without it.
+
+Old daily history can't be imported this way, because most counters only keep a total. The trend line starts flat on the day you switch and fills in over the next 30 days.
+
+#### Correcting a count
+
+To remove views you know shouldn't count, such as your own testing, adjust both tables by the same amount:
+
+```bash
+npx wrangler d1 execute gh-view-counter --remote --command "
+  UPDATE views       SET count = count - 1 WHERE id = 'jashankish';
+  UPDATE daily_views SET count = count - 1 WHERE id = 'jashankish' AND day = '<YYYY-MM-DD>' AND count > 0"
+```
+
+Testing with `preview=true` avoids the need: the badge renders but nothing is counted.
+
+#### Backups and restoring
+
+- **Point-in-time restore.** D1's Time Travel keeps a rolling history of the database: 7 days on the free plan and 30 days on paid plans, at the time of writing. `npx wrangler d1 time-travel info gh-view-counter` prints the current restore point (a "bookmark"). `npx wrangler d1 time-travel restore gh-view-counter --timestamp=<ISO time>`, or `--bookmark=<bookmark>`, rolls the whole database back to that moment. A restore affects both tables at once, so totals and daily rows stay consistent.
+- **Your own copy.** `npx wrangler d1 export gh-view-counter --remote --output=views-backup.sql` writes every table to a SQL file you can keep anywhere. To load it into a new database, use `npx wrangler d1 execute <db> --remote --file=views-backup.sql`.
+
+#### Why D1 and not Workers KV
+
+KV is Cloudflare's simpler key-value store, but it doesn't fit a counter:
 
 - **Write limit.** KV's free plan allows 1,000 writes a day, so the counter would stop at 1,000 views. D1 allows 100,000 rows.
 - **No atomic increment.** KV is eventually consistent and has no increment operation, so it can only do the lossy read-then-write described above.
