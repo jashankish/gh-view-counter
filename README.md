@@ -49,14 +49,14 @@ The badge can be a slim pill or a small card that also shows today's visits and 
 
 Put the counter on your own GitHub profile in about 10 minutes. It runs on **your own** free Cloudflare account; nothing in this repository is tied to anyone else's.
 
-**You need:** a GitHub account, a free [Cloudflare account](https://dash.cloudflare.com/sign-up), [Node.js](https://nodejs.org) 22.5 or newer, and a terminal.
+**You need:** a GitHub account, a free [Cloudflare account](https://dash.cloudflare.com/sign-up), [Node.js](https://nodejs.org) 22.5 or newer, [Git](https://git-scm.com), and a terminal.
+
+Throughout these steps, replace anything in `<angle brackets>` with your own value, without the brackets. For example, `<your-username>` becomes `octocat`.
 
 **1. Get the code**
 
-Fork this repository on GitHub, then:
-
 ```bash
-git clone https://github.com/<your-username>/gh-view-counter.git
+git clone https://github.com/jashankish/gh-view-counter.git
 cd gh-view-counter
 npm install
 ```
@@ -79,11 +79,18 @@ The output ends with a line like `database_id = "1a2b3c4d-…"`. Copy that ID.
 
 **4. Add your two settings**
 
-Open `wrangler.toml` and change these two lines:
+Open `wrangler.toml` in any text editor. Find these two lines, which are already in the file:
 
 ```toml
-ALLOWED_USERS = "<your-username>"         # your GitHub username
-database_id = "<the ID from step 3>"
+ALLOWED_USERS = ""
+database_id = "00000000-0000-0000-0000-000000000000"
+```
+
+Fill in the quotes with your GitHub username and the ID from step 3, then save:
+
+```toml
+ALLOWED_USERS = "octocat"
+database_id = "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
 ```
 
 **5. Create the tables**
@@ -100,7 +107,7 @@ Answer `y` if asked to confirm.
 npm run deploy
 ```
 
-The first time, Cloudflare asks you to pick a `workers.dev` subdomain; any free name works. The output ends with your Worker's address, such as `https://gh-view-counter.<your-subdomain>.workers.dev`.
+If this is your first Worker, Cloudflare may ask you to choose a `workers.dev` subdomain; any available name works. The output ends with your Worker's address, such as `https://gh-view-counter.<your-subdomain>.workers.dev`. Copy it; you need it in the next two steps.
 
 **7. Check that it works**
 
@@ -114,13 +121,13 @@ You should see the card showing `0`. `preview=true` displays the badge without c
 
 **8. Add it to your profile**
 
-Your profile README lives in a repository named exactly like your username (`<your-username>/<your-username>`). If you don't have one yet, create it on GitHub and tick **Add a README file**. Then add this line wherever you want the counter:
+Your profile README lives in a repository named exactly like your username (`<your-username>/<your-username>`). If you don't have one yet, create it on GitHub and tick **Add a README file**. Open its `README.md`, click the pencil icon to edit, and add this line wherever you want the counter:
 
 ```markdown
 ![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>&style=card)
 ```
 
-Commit the change and open your profile; the count goes up with every visit. Use `style=card&theme=dark` for the dark card, or leave out `style=card` for the slim pill. See [Styles](#styles) for every option.
+Click **Commit changes**, then open your profile; the count goes up with every visit. Use `style=card&theme=dark` for the dark card, or leave out `style=card` for the slim pill. See [Styles](#styles) for every option.
 
 **If something looks wrong**
 
@@ -132,7 +139,7 @@ Commit the change and open your profile; the count goes up with every visit. Use
 | An error about authentication | Your Cloudflare sign-in expired. Run `npx wrangler login` again. |
 | The number doesn't change when you refresh | GitHub can take a few seconds to fetch a new image. Each page load counts once. |
 
-**Before you push your fork:** `wrangler.toml` now contains your database ID. It isn't a password, but if you'd rather not publish it, don't commit that file, or use the [GitHub Actions setup](#option-b-deploy-from-github-actions-keeping-your-values-out-of-the-repository), which keeps both settings out of the repository.
+**If you publish your copy of the code:** your edited `wrangler.toml` contains your database ID. It isn't a password, but if you'd rather not publish it, don't commit that file, or use the [GitHub Actions setup](#option-b-deploy-from-github-actions-keeping-your-values-out-of-the-repository), which keeps both settings out of the repository.
 
 To move your existing count over from another counter, see [Carrying over a count](#carrying-over-a-count-from-another-counter).
 
