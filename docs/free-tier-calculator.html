@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free-Tier Headroom</title>
+<style>
+  :root {
+    --bg: #fbfaf8; --surface: #ffffff; --text: #1d1c1a; --muted: #6b6862; --line: #e6e3de;
+    --ok: #2f7d4f; --warn: #b7791f; --over: #c0392b; --track: #efece7; --accent: #1f5fbf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615; --surface: #1f1f1d; --text: #ecebe8; --muted: #a09d97; --line: #33322f;
+      --ok: #5cbf86; --warn: #e0a84a; --over: #ef6b5b; --track: #2b2a28; --accent: #6ea3f0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161615; --surface: #1f1f1d; --text: #ecebe8; --muted: #a09d97; --line: #33322f;
+    --ok: #5cbf86; --warn: #e0a84a; --over: #ef6b5b; --track: #2b2a28; --accent: #6ea3f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .control { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 20px; }
+  .control label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-weight: 600; }
+  .control output { font-variant-numeric: tabular-nums; font-size: 24px; font-weight: 650; }
+  .control output small { font-size: 13px; color: var(--muted); font-weight: 400; }
+  input[type=range] { width: 100%; margin: 14px 0 4px; accent-color: var(--accent); }
+  .ticks { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .row { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; }
+  .row-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  .name { font-weight: 600; }
+  .name .tag { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid currentColor; border-radius: 99px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px; }
+  .pct { font-variant-numeric: tabular-nums; font-weight: 650; }
+  .bar { height: 8px; background: var(--track); border-radius: 99px; margin: 10px 0 8px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 99px; transition: width .15s ease; }
+  .detail { color: var(--muted); font-size: 13px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .over { color: var(--over); }
+  .fill-ok { background: var(--ok); } .fill-warn { background: var(--warn); } .fill-over { background: var(--over); }
+  footer { color: var(--muted); font-size: 12.5px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Free-tier headroom</h1>
+  <p class="sub">How much of each stack's free quota a view counter uses. Each view costs 1 request plus 1 write. Monthly quotas are divided by 30.</p>
+
+  <div class="control">
+    <label for="views">Profile views per day <output id="out">1,000 <small>views/day</small></output></label>
+    <input id="views" type="range" min="0" max="100" step="1" value="50">
+    <div class="ticks"><span>10</span><span>1k</span><span>100k</span></div>
+  </div>
+
+  <div id="rows"></div>
+
+  <footer>Limits come from the providers' documentation at the time of writing. The bar shows the stack's tightest constraint. Check current pricing pages before relying on these numbers.</footer>
+</main>
+<script>
+  // Each stack: daily capacity of each resource, in views/day.
+  const STACKS = [
+    { name: "Workers + D1", tag: "this project", limits: [["Worker requests", 100000], ["D1 rows written", 100000], ["D1 rows read", 5000000]] },
+    { name: "Workers + KV", limits: [["Worker requests", 100000], ["KV writes", 1000], ["KV reads", 100000]] },
+    { name: "Vercel + Upstash Redis", limits: [["Vercel invocations", 1000000 / 30], ["Upstash commands", 500000 / 30]] },
+    { name: "AWS Lambda + DynamoDB", limits: [["Lambda requests", 1000000 / 30]] },
+  ];
+  const fmt = (n) => Math.round(n).toLocaleString("en-US");
+  const slider = document.getElementById("views");
+  const out = document.getElementById("out");
+  const rows = document.getElementById("rows");
+
+  // Log scale: 0..100 → 10..100,000 views/day
+  const toViews = (v) => Math.round(10 ** (1 + (v / 100) * 4));
+
+  function render() {
+    const views = toViews(+slider.value);
+    out.innerHTML = `${fmt(views)} <small>views/day</small>`;
+    rows.innerHTML = STACKS.map((s) => {
+      const [res, cap] = s.limits.reduce((a, b) => (b[1] < a[1] ? b : a));
+      const pct = (views / cap) * 100;
+      const level = pct > 100 ? "over" : pct > 70 ? "warn" : "ok";
+      const verdict = pct > 100
+        ? `Over the limit. ${res} run out after ${fmt(cap)} views, about ${((cap / views) * 24).toFixed(1)} h into the day.`
+        : `${res}: ${fmt(views)} of ${fmt(cap)}/day.`;
+      return `<div class="row">
+        <div class="row-head"><span class="name">${s.name}${s.tag ? `<span class="tag">${s.tag}</span>` : ""}</span>
+        <span class="pct ${level}">${pct < 0.1 ? "<0.1" : pct.toFixed(pct < 10 ? 1 : 0)}%</span></div>
+        <div class="bar"><span class="fill-${level}" style="width:${Math.min(pct, 100)}%"></span></div>
+        <div class="detail">${verdict}</div></div>`;
+    }).join("");
+  }
+  slider.addEventListener("input", render);
+  render();
+</script>
+</body>
+</html>

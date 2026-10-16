@@ -1,0 +1,22 @@
+name = "gh-view-counter"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[vars]
+# Comma-separated GitHub usernames allowed to have counters. Keeps strangers
+# from burning your free-tier quota. Set to "" to allow anyone.
+ALLOWED_USERS = "jashankish"
+# "true" = only requests from GitHub's camo proxy increment the count;
+# opening the badge URL directly in a browser just shows the current value.
+COUNT_ONLY_CAMO = "false"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gh-view-counter"
+# Paste the id printed by `npx wrangler d1 create gh-view-counter`.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[observability]
+enabled = true
