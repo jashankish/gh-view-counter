@@ -207,6 +207,15 @@ test("helpers", () => {
   assert.equal(formatCount(1000, true), "1k");
   assert.equal(formatCount(25_400, true), "25k");
   assert.equal(formatCount(3_200_000, true), "3.2M");
+  // rounding edges: halves round up, and 1000k carries into M
+  assert.equal(formatCount(1_049, true), "1k");
+  assert.equal(formatCount(1_050, true), "1.1k");
+  assert.equal(formatCount(9_950, true), "10k");
+  assert.equal(formatCount(99_999, true), "100k");
+  assert.equal(formatCount(999_499, true), "999k");
+  assert.equal(formatCount(999_999, true), "1M");
+  assert.equal(formatCount(1_234_567, true), "1.2M");
+  assert.equal(formatCount(999_999, false), "999,999");
   assert.equal(resolveColor("#ABC", "x"), "#abc");
   assert.equal(resolveColor("ff8800", "x"), "#ff8800");
   assert.equal(resolveColor("brightgreen", "x"), "#4c1");

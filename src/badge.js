@@ -34,12 +34,16 @@ export function renderError(opts, message) {
 export function formatCount(n, abbreviated = false) {
   if (!abbreviated || n < 1000) return n.toLocaleString("en-US");
   const units = ["k", "M", "B", "T"];
-  let value = n;
-  let unit = -1;
-  while (value >= 1000 && unit < units.length - 1) {
-    value /= 1000;
+  let unit = 0;
+  while (unit < units.length - 1 && n >= 1000 ** (unit + 2)) unit++;
+  const scale = 1000 ** (unit + 1);
+  // Round with integer division (not toFixed) so halves round up reliably:
+  // one decimal below 10 (1.2k), whole numbers above (13k).
+  let value = n < scale * 10 ? Math.round(n / (scale / 10)) / 10 : Math.round(n / scale);
+  // 999,999 rounds to 1000k; carry it into the next unit instead (1M).
+  if (value >= 1000 && unit < units.length - 1) {
     unit++;
+    value = 1;
   }
-  const digits = value < 10 ? 1 : 0;
-  return `${Number(value.toFixed(digits))}${units[unit]}`;
+  return `${value}${units[unit]}`;
 }
