@@ -3,10 +3,16 @@ main = "src/index.js"
 compatibility_date = "2025-09-01"
 workers_dev = true
 
+# The two values marked "your value" below are specific to each deployment.
+# Either edit them here before deploying, or leave them as they are and let the
+# GitHub Actions workflow fill them in from repository settings at deploy time
+# (D1_DATABASE_ID secret, ALLOWED_USERS variable), so they never appear in the repo.
+
 [vars]
-# Comma-separated GitHub usernames allowed to have counters. Keeps strangers
-# from burning your free-tier quota. Set to "" to allow anyone.
-ALLOWED_USERS = "jashankish"
+# Your value: comma-separated GitHub usernames allowed to have counters, e.g.
+# "octocat". Keeps strangers from using up your free-tier quota.
+# Empty means anyone can use your deployment.
+ALLOWED_USERS = ""
 # "true" = only requests from GitHub's camo proxy increment the count;
 # opening the badge URL directly in a browser just shows the current value.
 COUNT_ONLY_CAMO = "false"
@@ -14,8 +20,8 @@ COUNT_ONLY_CAMO = "false"
 [[d1_databases]]
 binding = "DB"
 database_name = "gh-view-counter"
-# The id printed by `npx wrangler d1 create gh-view-counter`. If you fork this
-# project, replace it with your own database's id.
+# Your value: the id printed by `npm run db:create`. The all-zero placeholder
+# works for local development (`npm run dev`) but not for deploying.
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 

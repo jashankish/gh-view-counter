@@ -30,7 +30,8 @@
 | SVG rendered by hand, no libraries | The bundle stays tiny (about 8 KiB gzipped) and there are no fonts to fetch. Text widths are estimated from font metrics and fixed with `textLength`. |
 | Motion is additive only | Browsers may stop repainting animated SVGs inside `<img>`, so a badge can freeze on its first frame. Nothing important starts hidden; animations only add decoration (a light sweep, a pulse) to an already finished design. |
 | Errors returned as **200** SVGs | camo shows a broken image for responses outside 2xx. A red "invalid user" or "unavailable" badge is easier to diagnose. |
-| An allowlist on by default | A public endpoint on a free tier invites others to use up your quota. |
+| A username allowlist | A public endpoint on a free tier invites others to use up your quota. Each deployment sets its own `ALLOWED_USERS`. |
+| No deployment-specific values in the repo | `wrangler.toml` ships with a placeholder database ID and an empty allowlist. Each deployment supplies its own, by editing the file locally or through GitHub Actions secrets and variables, so the repository can be public without exposing anyone's Cloudflare details. |
 
 ## Free-tier capacity
 

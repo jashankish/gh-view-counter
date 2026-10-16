@@ -50,13 +50,13 @@ The badge can be a slim pill or a small card that also shows today's visits and 
 After [deploying](#deploy), add one line to your profile's `README.md`:
 
 ```markdown
-![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=jashankish)
+![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>)
 ```
 
 Or use the stats card:
 
 ```markdown
-![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=jashankish&style=card)
+![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>&style=card)
 ```
 
 ---
@@ -175,7 +175,7 @@ The Worker (`src/index.js`) is a single `fetch` handler. For a badge request it 
 /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/
 ```
 
-An optional `repo` parameter must match `[a-z0-9._-]{1,100}` and can't be `.` or `..`. The counter's database key is `user` or `user/repo`. Lowercasing means `JashanKish` and `jashankish` share one counter, just as GitHub treats them as the same account. Unknown `style` or `theme` values fall back to the defaults instead of failing.
+An optional `repo` parameter must match `[a-z0-9._-]{1,100}` and can't be `.` or `..`. The counter's database key is `user` or `user/repo`. Lowercasing means `OctoCat` and `octocat` share one counter, just as GitHub treats them as the same account. Unknown `style` or `theme` values fall back to the defaults instead of failing.
 
 **Allowlist.** If `ALLOWED_USERS` is set, any other username gets a "user not allowed" badge, and the Worker returns before touching the database. Without this, anyone could embed badges that point at your Worker and use up your free quota.
 
@@ -205,7 +205,7 @@ All counts are stored in a **Cloudflare D1 database**, a hosted SQLite database,
 | --- | --- |
 | **Database** | `gh-view-counter`, created by `npm run db:create` |
 | **Location** | One primary region chosen by Cloudflare when the database is created, usually the one nearest you. The Worker runs worldwide and reaches the database over Cloudflare's network. |
-| **How the Worker finds it** | The `[[d1_databases]]` block in `wrangler.toml` binds the database to the name `DB`. The code only ever refers to `env.DB`. The `database_id` there identifies the database but isn't a secret; nothing can be read without the account's credentials. |
+| **How the Worker finds it** | The `[[d1_databases]]` block in `wrangler.toml` binds the database to the name `DB`. The code only ever refers to `env.DB`. The committed file holds an all-zero placeholder `database_id`. Your real one is either pasted in before deploying or filled in by the deploy workflow from a repository secret; see [Deploy](#deploy). The ID identifies a database but isn't a password: nothing can be read without the account's credentials. |
 | **Tables** | Created by the SQL files in `migrations/`, which `npm run db:migrate` applies in order |
 
 The data is **not** stored in GitHub, in this repository or in the badge image. A badge is generated fresh on every request from what's in the database.
@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS daily_views (
 
 | Column | Meaning |
 | --- | --- |
-| `id` | The counter's key: the lowercased username (`jashankish`), or `username/repo` for a per-repository counter (`jashankish/gh-view-counter`). Each key is an independent counter. |
+| `id` | The counter's key: the lowercased username (`octocat`), or `username/repo` for a per-repository counter (`octocat/hello-world`). Each key is an independent counter. |
 | `views.count` | The all-time total of counted views for that key |
 | `views.created_at` / `updated_at` | Unix timestamps (seconds) of the first view and the most recent one |
 | `daily_views.day` | A UTC calendar date written as text, `YYYY-MM-DD`, so rows sort chronologically |
@@ -318,11 +318,11 @@ npx wrangler d1 execute gh-view-counter --remote --command "SELECT * FROM views"
 
 # Daily history, newest first
 npx wrangler d1 execute gh-view-counter --remote \
-  --command "SELECT day, count FROM daily_views WHERE id = 'jashankish' ORDER BY day DESC"
+  --command "SELECT day, count FROM daily_views WHERE id = '<your-username>' ORDER BY day DESC"
 
 # Views per month
 npx wrangler d1 execute gh-view-counter --remote \
-  --command "SELECT substr(day, 1, 7) AS month, SUM(count) AS views FROM daily_views WHERE id = 'jashankish' GROUP BY month ORDER BY month"
+  --command "SELECT substr(day, 1, 7) AS month, SUM(count) AS views FROM daily_views WHERE id = '<your-username>' GROUP BY month ORDER BY month"
 ```
 
 Without `--remote`, the commands run against the local development database instead.
@@ -351,8 +351,8 @@ To remove views you know shouldn't count, such as your own testing, adjust both 
 
 ```bash
 npx wrangler d1 execute gh-view-counter --remote --command "
-  UPDATE views       SET count = count - 1 WHERE id = 'jashankish';
-  UPDATE daily_views SET count = count - 1 WHERE id = 'jashankish' AND day = '<YYYY-MM-DD>' AND count > 0"
+  UPDATE views       SET count = count - 1 WHERE id = '<your-username>';
+  UPDATE daily_views SET count = count - 1 WHERE id = '<your-username>' AND day = '<YYYY-MM-DD>' AND count > 0"
 ```
 
 Testing with `preview=true` avoids the need: the badge renders but nothing is counted.
@@ -438,27 +438,79 @@ Each request uses well under the free plan's 10 ms of CPU time, and time spent w
 
 ## Deploy
 
-You need a free Cloudflare account and Node.js 22.5 or newer.
+Everything runs on **your own** free Cloudflare account; nothing in this repository points at anyone else's. You need Node.js 22.5 or newer.
 
-```bash
-npm install
-npx wrangler login                 # one-time browser sign-in
-npm run db:create                  # prints a database_id
-#   → paste it into wrangler.toml under [[d1_databases]]
-npm run db:migrate                 # creates the views and daily_views tables in D1
-npm run deploy                     # prints https://gh-view-counter.<subdomain>.workers.dev
-```
+Each deployment needs two values of its own:
 
-Then add the badge to your `<username>/<username>` profile repository.
+| Value | What it is | Where it goes |
+| --- | --- | --- |
+| **Database ID** | Identifies your D1 database. Printed by `npm run db:create`. | `database_id` in `wrangler.toml` |
+| **Allowed usernames** | The GitHub username(s) your counter serves, such as `octocat` | `ALLOWED_USERS` in `wrangler.toml` |
 
-If you deployed before the `card` style existed, run `npm run db:migrate` again to add the `daily_views` table. Wrangler applies only the migrations it hasn't run yet.
+The committed `wrangler.toml` holds neutral defaults: an all-zero `database_id` and an empty `ALLOWED_USERS`. Choose one of the two ways below to supply your values.
 
-### Deploy on every push (optional)
+### Option A: deploy from your computer
 
-`.github/workflows/deploy.yml` runs the tests on every push and pull request. On pushes to `main`, it then applies database migrations and deploys. Add two repository secrets:
+1. Get the code and install the tools:
 
-- `CLOUDFLARE_API_TOKEN`: create it from the "Edit Cloudflare Workers" template and add the **D1: Edit** permission.
-- `CLOUDFLARE_ACCOUNT_ID`
+   ```bash
+   git clone https://github.com/<owner>/gh-view-counter.git   # or your fork
+   cd gh-view-counter
+   npm install
+   ```
+
+2. Sign in to Cloudflare and create the database:
+
+   ```bash
+   npx wrangler login       # opens your browser once
+   npm run db:create        # prints: database_id = "…"
+   ```
+
+3. Open `wrangler.toml` and fill in your values:
+
+   ```toml
+   ALLOWED_USERS = "<your-username>"
+   database_id = "<the id printed in step 2>"
+   ```
+
+4. Create the tables and deploy:
+
+   ```bash
+   npm run db:migrate       # creates the views and daily_views tables
+   npm run deploy           # prints https://gh-view-counter.<your-subdomain>.workers.dev
+   ```
+
+   The first time you deploy a Worker, Cloudflare asks you to choose a `workers.dev` subdomain. That subdomain becomes part of your badge URL.
+
+5. Add the badge to the `README.md` of your profile repository, the repository named exactly like your username (`<your-username>/<your-username>`):
+
+   ```markdown
+   ![Profile views](https://gh-view-counter.<your-subdomain>.workers.dev/?user=<your-username>&style=card)
+   ```
+
+If you publish your copy of the repository, decide whether you're comfortable committing your database ID. It isn't a password, but if you'd rather keep it private, don't commit your edited `wrangler.toml`; use option B instead.
+
+### Option B: deploy from GitHub Actions, keeping your values out of the repository
+
+`.github/workflows/deploy.yml` runs the tests on every push and pull request. On pushes to `main`, it applies database migrations and deploys. Before deploying, it writes your values into `wrangler.toml` inside the build machine only, so the repository keeps its neutral defaults.
+
+1. Do steps 1 and 2 of option A once to create your database, or create it in the Cloudflare dashboard under Storage & Databases → D1. Note its ID.
+2. In your repository on GitHub, open **Settings → Secrets and variables → Actions** and add:
+
+   | Kind | Name | Value |
+   | --- | --- | --- |
+   | Secret | `CLOUDFLARE_API_TOKEN` | An API token from the Cloudflare dashboard (My Profile → API Tokens). Start from the "Edit Cloudflare Workers" template and add the **D1: Edit** permission. |
+   | Secret | `CLOUDFLARE_ACCOUNT_ID` | Your account ID, shown on the Cloudflare dashboard's overview page or by `npx wrangler whoami` |
+   | Secret | `D1_DATABASE_ID` | Your database ID |
+   | Variable | `ALLOWED_USERS` | Your GitHub username, or several separated by commas |
+
+3. Push to `main`, or run the workflow by hand from the **Actions** tab. Do step 5 of option A to add the badge.
+
+Until `CLOUDFLARE_API_TOKEN` is set, the deploy job is skipped with a notice rather than failing, so a fresh fork passes CI.
+
+### Updating an existing deployment
+
+Run `npm run db:migrate` before `npm run deploy` whenever you pull new changes. Wrangler applies only the migrations it hasn't run yet; for example, `0002_daily_views.sql` adds the table the `card` style needs. The GitHub Actions workflow does this automatically.
 
 ---
 
@@ -487,20 +539,20 @@ If you deployed before the `card` style existed, run `npm run db:migrate` again 
 | `preview` | `false` | all | `true` shows the count without counting a view |
 
 ```markdown
-![Visitors](https://…workers.dev/?user=jashankish&label=Visitors&color=rose)
-![Views](https://…workers.dev/?user=jashankish&style=card&color=emerald&theme=dark)
-![Repo views](https://…workers.dev/?user=jashankish&repo=gh-view-counter&style=flat-square)
+![Visitors](https://…workers.dev/?user=<your-username>&label=Visitors&color=rose)
+![Views](https://…workers.dev/?user=<your-username>&style=card&color=emerald&theme=dark)
+![Repo views](https://…workers.dev/?user=<your-username>&repo=gh-view-counter&style=flat-square)
 ```
 
 ---
 
 ## Configuration
 
-Set these in `wrangler.toml` under `[vars]`:
+Set these in `wrangler.toml` under `[vars]`. With option B, `ALLOWED_USERS` can come from the repository variable instead.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ALLOWED_USERS` | `jashankish` | Comma-separated usernames allowed to have counters. Set it to `""` to run a public service. |
+| `ALLOWED_USERS` | `""` (anyone) | Comma-separated usernames allowed to have counters. **Set this to your username.** Otherwise anyone can embed badges that use your deployment and its free quota. |
 | `COUNT_ONLY_CAMO` | `false` | With `true`, only requests from GitHub's camo proxy count a view. Opening the badge URL directly then shows the count without raising it. |
 
 ---
@@ -511,7 +563,7 @@ Set these in `wrangler.toml` under `[vars]`:
 npm test                  # run the test suite
 npm run examples          # regenerate docs/examples/*.svg
 npm run db:migrate:local  # create the tables in a local D1 database
-npm run dev               # http://localhost:8787/?user=jashankish&style=card
+npm run dev               # http://localhost:8787/?user=<your-username>&style=card
 ```
 
 The tests use Node's built-in test runner. Instead of a mock database, `test/fake-d1.js` wraps Node's built-in SQLite (`node:sqlite`) behind the same `prepare().bind()`, `first()`, `all()` and `batch()` interface that D1 provides, and applies every real migration file. The SQL that runs in production is the SQL under test. The suite covers:

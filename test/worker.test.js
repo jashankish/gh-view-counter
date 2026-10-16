@@ -12,7 +12,7 @@ const countIn = (svg) => svg.match(/<title>[^:]*: ([^<]+)<\/title>/)[1];
 test("increments atomically and returns an uncacheable SVG", async () => {
   const e = env();
   for (let i = 1; i <= 3; i++) {
-    const res = await get(e, "/?user=jashankish");
+    const res = await get(e, "/?user=octocat");
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("Content-Type"), "image/svg+xml; charset=utf-8");
     assert.match(res.headers.get("Cache-Control"), /no-store/);
@@ -32,11 +32,11 @@ test("concurrent views are never lost", async () => {
 
 test("usernames are case-insensitive and repos get separate counters", async () => {
   const e = env();
-  await get(e, "/?user=JashanKish");
-  await get(e, "/?user=jashankish");
-  await get(e, "/?user=jashankish&repo=My.Repo");
-  assert.equal((await (await get(e, "/api/views?user=jashankish")).json()).views, 2);
-  assert.equal((await (await get(e, "/api/views?user=jashankish&repo=my.repo")).json()).views, 1);
+  await get(e, "/?user=OctoCat");
+  await get(e, "/?user=octocat");
+  await get(e, "/?user=octocat&repo=My.Repo");
+  assert.equal((await (await get(e, "/api/views?user=octocat")).json()).views, 2);
+  assert.equal((await (await get(e, "/api/views?user=octocat&repo=my.repo")).json()).views, 1);
 });
 
 test("preview, HEAD and /api/views do not increment", async () => {
@@ -56,7 +56,7 @@ test("COUNT_ONLY_CAMO only counts GitHub's proxy", async () => {
 });
 
 test("allowlist blocks other users without touching the DB", async () => {
-  const e = env({ ALLOWED_USERS: "jashankish, other" });
+  const e = env({ ALLOWED_USERS: "octocat, other" });
   const res = await get(e, "/?user=stranger");
   assert.equal(res.status, 200);
   assert.match(await res.text(), /user not allowed/);
